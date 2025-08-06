@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gravity Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #0e0e0e;
+      color: #fff;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(20, 20, 20, 0.85);
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+      width: 250px;
+    }
+    #fps {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(20, 20, 20, 0.85);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 10;
+    }
+    input, select, button {
+      margin-top: 6px;
+      margin-bottom: 12px;
+      width: 100%;
+      padding: 6px;
+      border-radius: 6px;
+      border: none;
+      font-size: 14px;
+    }
+    label {
+      font-size: 14px;
+      font-weight: 600;
+      display: block;
+      margin-top: 10px;
+    }
+    button {
+      background-color: #3498db;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    button:hover {
+      background-color: #2980b9;
+    }
+    canvas {
+      display: block;
+    }
+    hr {
+      border: 0;
+      border-top: 1px solid #333;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="2560" height="1440"></canvas>
+  <div id="ui">
+    <div>
+      <label for="radius">Planet Radius</label>
+      <input type="number" id="radius" value="10" min="1" max="100">
+
+      <label for="mass">Mass</label>
+      <input type="number" id="mass" value="100">
+
+      <label for="color">Color</label>
+      <input type="color" id="color" value="#ffffff">
+
+      <label for="speed">Initial Speed</label>
+      <input type="range" id="speed" min="0" max="10" step="0.1" value="2">
+
+      <label for="direction">Initial Direction (degrees)</label>
+      <input type="range" id="direction" min="0" max="360" step="1" value="0">
+
+      <label for="gravitySlider">Gravity Strength</label>
+      <input type="range" id="gravitySlider" min="1" max="100" value="10">
+
+      <label for="trailLength">Trail Length</label>
+      <input type="range" id="trailLength" min="10" max="300" value="100">
+
+      <button onclick="addPlanet()">Add Planet</button>
+    </div>
+    <hr>
+    <div>
+      <button onclick="playSim()">▶️ Play</button>
+      <button onclick="pauseSim()">⏸ Pause</button>
+      <button onclick="resetSim()">🔁 Reset</button>
+
+      <label for="simSpeed">Simulation Speed</label>
+      <input type="range" id="simSpeed" min="0.1" max="2" step="0.1" value="1">
+
+      <label for="trails">
+        <input type="checkbox" id="trails" checked>
+        Show Trails
+      </label>
+    </div>
+    <small style="display:block; margin-top:10px; color:gray">
+      Press <b>Spacebar</b> to save planet position<br>Press <b>H</b> to hide/show UI<br>Press <b>Left Click</b> to easily visualize the planet's shape and size
+    </small>
+  </div>
+  <div id="fps">FPS: 0</div>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const ui = document.getElementById('ui');
+    let planets = [];
+    let running = false;
+    let ghostPlanet = {
+      x: 0, y: 0, radius: 10, mass: 100, color: '#ffffff', speed: 2, direction: 0
+    };
+    let showTrails = true;
+    let lastFrameTime = performance.now();
+    let fps = 0;
+    let uiVisible = true;
+
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      ghostPlanet.x = e.clientX - rect.left;
+      ghostPlanet.y = e.clientY - rect.top;
+    });
+
+    document.getElementById('radius').addEventListener('input', e => ghostPlanet.radius = +e.target.value);
+    document.getElementById('mass').addEventListener('input', e => ghostPlanet.mass = +e.target.value);
+    document.getElementById('color').addEventListener('input', e => ghostPlanet.color = e.target.value);
+    document.getElementById('speed').addEventListener('input', e => ghostPlanet.speed = +e.target.value);
+    document.getElementById('direction').addEventListener('input', e => ghostPlanet.direction = +e.target.value);
+    document.getElementById('trails').addEventListener('change', e => showTrails = e.target.checked);
+
+    function addPlanet() {
+      const angle = ghostPlanet.direction * Math.PI / 180;
+      planets.push({
+        x: ghostPlanet.x,
+        y: ghostPlanet.y,
+        radius: ghostPlanet.radius,
+        mass: ghostPlanet.mass,
+        color: ghostPlanet.color,
+        vx: Math.cos(angle) * ghostPlanet.speed,
+        vy: Math.sin(angle) * ghostPlanet.speed,
+        trail: []
+      });
+    }
+
+    function playSim() { running = true; }
+    function pauseSim() { running = false; }
+    function resetSim() { planets = []; running = false; }
+
+    function update(dt) {
+      let G = +document.getElementById('gravitySlider').value;
+      let maxTrail = +document.getElementById('trailLength').value;
+      for (let i = 0; i < planets.length; i++) {
+        let p1 = planets[i];
+        for (let j = 0; j < planets.length; j++) {
+          if (i === j) continue;
+          let p2 = planets[j];
+          let dx = p2.x - p1.x;
+          let dy = p2.y - p1.y;
+          let distSq = dx * dx + dy * dy;
+          let dist = Math.sqrt(distSq);
+          let minDist = p1.radius + p2.radius;
+          if (dist < minDist) dist = minDist;
+          let force = G * p1.mass * p2.mass / (dist * dist);
+          let fx = (dx / dist) * force;
+          let fy = (dy / dist) * force;
+          p1.vx += fx / p1.mass * dt;
+          p1.vy += fy / p1.mass * dt;
+        }
+      }
+      for (let p of planets) {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        if (p.x - p.radius < 0 || p.x + p.radius > canvas.width) {
+          p.vx *= -0.9;
+          if (p.x - p.radius < 0) p.x = p.radius;
+          if (p.x + p.radius > canvas.width) p.x = canvas.width - p.radius;
+        }
+        if (p.y - p.radius < 0 || p.y + p.radius > canvas.height) {
+          p.vy *= -0.9;
+          if (p.y - p.radius < 0) p.y = p.radius;
+          if (p.y + p.radius > canvas.height) p.y = canvas.height - p.radius;
+        }
+
+        if (showTrails) {
+          const maxTrail = +document.getElementById('trailLength').value;
+          p.trail.push({ x: p.x, y: p.y });
+          while (p.trail.length > maxTrail) {
+            p.trail.shift();
+          }
+        } else {
+          p.trail = [];
+        }
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let p of planets) {
+        if (showTrails && p.trail.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(p.trail[0].x, p.trail[0].y);
+          for (let point of p.trail) ctx.lineTo(point.x, point.y);
+          ctx.strokeStyle = hexToRGBA(p.color, 0.3);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + p.vx * 5, p.y + p.vy * 5);
+        ctx.strokeStyle = p.color;
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(ghostPlanet.x, ghostPlanet.y, ghostPlanet.radius, 0, Math.PI * 2);
+      ctx.fillStyle = hexToRGBA(ghostPlanet.color, 0.3);
+      ctx.fill();
+      let angle = ghostPlanet.direction * Math.PI / 180;
+      let vx = Math.cos(angle) * ghostPlanet.speed * 5;
+      let vy = Math.sin(angle) * ghostPlanet.speed * 5;
+      ctx.beginPath();
+      ctx.moveTo(ghostPlanet.x, ghostPlanet.y);
+      ctx.lineTo(ghostPlanet.x + vx, ghostPlanet.y + vy);
+      ctx.strokeStyle = hexToRGBA(ghostPlanet.color, 0.5);
+      ctx.stroke();
+    }
+
+    function hexToRGBA(hex, alpha) {
+      const bigint = parseInt(hex.slice(1), 16);
+      const r = (bigint >> 16) & 255;
+      const g = (bigint >> 8) & 255;
+      const b = bigint & 255;
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space') addPlanet();
+      if (e.code === 'KeyH') {
+        uiVisible = !uiVisible;
+        ui.style.display = uiVisible ? 'block' : 'none';
+      }
+    });
+
+    function loop() {
+      requestAnimationFrame(loop);
+      const now = performance.now();
+      fps = Math.round(1000 / (now - lastFrameTime));
+      lastFrameTime = now;
+      document.getElementById('fps').textContent = `FPS: ${fps}`;
+      if (running) update(0.5 * document.getElementById('simSpeed').value);
+      draw();
+    }
+    loop();
+  </script>
+</body>
+</html>
